@@ -13,12 +13,7 @@ const DEFAULT_SETTINGS = {
     transport: 30,
     bonus: { tier10: 500, tier5: 200 },
     bosses: ['Leonard', 'Gordon', 'Viann', 'Vivian'],
-    fulltime: [
-        { name: 'Vivian', salary: 1000 },
-        { name: 'Gordon', salary: 1000 },
-        { name: 'Leonard', salary: 1000 },
-        { name: 'Viann', salary: 1000 }
-    ]
+    fulltime: []
 };
 
 // --- State ---
@@ -69,7 +64,6 @@ function populateSettings() {
     el('bonus-5').value = settings.bonus.tier5;
     el('gemini-api-key').value = settings.geminiKey || '';
     renderBossList();
-    renderFulltimeList();
     updateParseMode();
 }
 
@@ -573,14 +567,7 @@ function renderResults(results) {
     let partTimeTotal = 0;
     for (const p of people) partTimeTotal += p.total;
 
-    // Fulltime totals
-    let fulltimeTotal = 0;
-    const fulltimeHTML = settings.fulltime.map(ft => {
-        fulltimeTotal += ft.salary;
-        return `<div class="detail-row"><span>${esc(ft.name)}（全職）</span><span>$${ft.salary.toLocaleString()}</span></div>`;
-    }).join('');
-
-    const grandTotal = partTimeTotal + fulltimeTotal;
+    const grandTotal = partTimeTotal;
     const month = el('salary-month').value;
     const monthLabel = month ? formatMonthLabel(month) : '未選月份';
 
@@ -590,8 +577,7 @@ function renderResults(results) {
             <div class="total-amount">$${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
             <div class="total-month">${monthLabel}</div>
             <div style="margin-top:8px;font-size:0.8em;opacity:0.7">
-                兼職: $${partTimeTotal.toLocaleString(undefined, {minimumFractionDigits: 2})} ｜
-                全職: $${fulltimeTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                兼職合計: $${partTimeTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}
             </div>
         </div>
     `;
@@ -601,11 +587,6 @@ function renderResults(results) {
         if (a.isBoss !== b.isBoss) return a.isBoss ? -1 : 1;
         return b.total - a.total;
     });
-
-    // Fulltime section
-    if (settings.fulltime.length) {
-        html += `<div class="card"><h3>👔 全職人員</h3>${fulltimeHTML}</div>`;
-    }
 
     // Part-time section
     html += `<h3 style="margin:16px 0 8px;font-size:0.95em">🕐 兼職人員</h3>`;
@@ -696,12 +677,6 @@ function exportCSV(results) {
         csv += `${p.name},GRAND TOTAL,,,,,,${p.total.toFixed(2)}\n\n`;
     }
 
-    // Fulltime
-    csv += '\nFull-time\nName,Monthly Salary\n';
-    for (const ft of settings.fulltime) {
-        csv += `${ft.name},${ft.salary.toFixed(2)}\n`;
-    }
-
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -736,7 +711,7 @@ function copyToSheets(results) {
     const payload = {
         month: monthLabel,
         parttime: parttime,
-        fulltime: settings.fulltime.map(ft => ({ name: ft.name, salary: ft.salary }))
+        fulltime: []
     };
 
     const btn = el('btn-copy-sheets');
@@ -769,15 +744,7 @@ function copySummary(results) {
     const monthLabel = month ? formatMonthLabel(month) : '';
     let text = `💰 ${monthLabel} 薪金摘要\n${'─'.repeat(25)}\n\n`;
 
-    // Fulltime
-    text += '👔 全職：\n';
-    let ftTotal = 0;
-    for (const ft of settings.fulltime) {
-        text += `  ${ft.name}: $${ft.salary.toLocaleString()}\n`;
-        ftTotal += ft.salary;
-    }
-
-    text += '\n🕐 兼職：\n';
+    text += '🕐 兼職：\n';
     let ptTotal = 0;
     for (const p of Object.values(results)) {
         text += `  ${p.name}: $${p.total.toLocaleString(undefined, {minimumFractionDigits: 2})}（${p.shiftCount}更）\n`;
@@ -785,9 +752,7 @@ function copySummary(results) {
     }
 
     text += `\n${'─'.repeat(25)}\n`;
-    text += `兼職合計: $${ptTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}\n`;
-    text += `全職合計: $${ftTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}\n`;
-    text += `總支出: $${(ptTotal + ftTotal).toLocaleString(undefined, {minimumFractionDigits: 2})}\n`;
+    text += `合計: $${ptTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}\n`;
 
     navigator.clipboard.writeText(text).then(() => {
         alert('已複製到剪貼簿 ✓');
@@ -814,29 +779,13 @@ function renderBossList() {
     });
 }
 
-function renderFulltimeList() {
-    const container = el('fulltime-list');
-    container.innerHTML = settings.fulltime.map((ft, i) => `
-        <div class="list-item">
-            <span>👔 ${esc(ft.name)} — $${ft.salary.toLocaleString()}</span>
-            <button data-idx="${i}" class="ft-remove">✕</button>
-        </div>
-    `).join('');
-
-    container.querySelectorAll('.ft-remove').forEach(btn => {
-        btn.addEventListener('click', () => {
-            settings.fulltime.splice(+btn.dataset.idx, 1);
-            renderFulltimeList();
-        });
-    });
-}
 
 // ============================================================
 // Name dropdowns
 // ============================================================
 function updateNameDropdowns() {
     const names = [...new Set(entries.map(e => e.name))];
-    const allNames = [...new Set([...names, ...settings.bosses, ...settings.fulltime.map(f => f.name)])];
+    const allNames = [...new Set([...names, ...settings.bosses])];
     allNames.sort();
 
     for (const id of ['manual-name', 'adj-name']) {
@@ -987,16 +936,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBossList();
     });
 
-    // Settings: add fulltime
-    el('btn-add-ft').addEventListener('click', () => {
-        const name = el('new-ft-name').value.trim();
-        const salary = parseFloat(el('new-ft-salary').value);
-        if (!name || !salary) return;
-        settings.fulltime.push({ name: normalizeName(name), salary });
-        el('new-ft-name').value = '';
-        el('new-ft-salary').value = '';
-        renderFulltimeList();
-    });
 
     // Save settings
     el('btn-save-settings').addEventListener('click', saveSettings);

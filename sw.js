@@ -1,4 +1,4 @@
-const CACHE_NAME = 'salary-calc-v4';
+const CACHE_NAME = 'salary-calc-v5';
 const ASSETS = ['/', 'index.html', 'style.css', 'app.js', 'manifest.json'];
 
 self.addEventListener('install', e => {
