@@ -652,6 +652,7 @@ function renderResults(results) {
     // Export buttons
     html += `
         <div class="export-row">
+            <button class="btn btn-primary" id="btn-copy-sheets">📊 複製到 Sheets</button>
             <button class="btn btn-export" id="btn-export-csv">📄 Export CSV</button>
             <button class="btn btn-outline" id="btn-copy-summary">📋 複製摘要</button>
         </div>
@@ -668,6 +669,7 @@ function renderResults(results) {
     });
 
     // Export handlers
+    el('btn-copy-sheets').addEventListener('click', () => copyToSheets(results));
     el('btn-export-csv').addEventListener('click', () => exportCSV(results));
     el('btn-copy-summary').addEventListener('click', () => copySummary(results));
 
@@ -707,6 +709,44 @@ function exportCSV(results) {
     a.download = `salary_${month}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+}
+
+function copyToSheets(results) {
+    const month = el('salary-month').value;
+    const monthLabel = month ? formatMonthLabel(month) : '';
+
+    // Header row
+    let tsv = '人名\t日期\t返工\t收工\t00:00前($)\t00:00後($)\t交通($)\t更期薪金($)\n';
+
+    for (const p of Object.values(results)) {
+        for (const s of p.shifts) {
+            tsv += `${p.name}\t${s.date}\t${s.timeIn}\t${s.timeOut}\t${s.beforePay.toFixed(2)}\t${s.afterPay.toFixed(2)}\t${s.transport.toFixed(2)}\t${s.total.toFixed(2)}\n`;
+        }
+    }
+
+    // Summary section
+    tsv += '\n人名\t更數\t更期薪金\t勤工獎\t調整\t總計\n';
+    let ptTotal = 0;
+    for (const p of Object.values(results)) {
+        tsv += `${p.name}\t${p.shiftCount}\t${p.shiftPay.toFixed(2)}\t${p.bonus.toFixed(2)}\t${p.adjTotal.toFixed(2)}\t${p.total.toFixed(2)}\n`;
+        ptTotal += p.total;
+    }
+
+    // Fulltime
+    let ftTotal = 0;
+    tsv += '\n全職人員\t月薪\n';
+    for (const ft of settings.fulltime) {
+        tsv += `${ft.name}\t${ft.salary.toFixed(2)}\n`;
+        ftTotal += ft.salary;
+    }
+
+    tsv += `\n兼職合計\t${ptTotal.toFixed(2)}\n`;
+    tsv += `全職合計\t${ftTotal.toFixed(2)}\n`;
+    tsv += `總支出\t${(ptTotal + ftTotal).toFixed(2)}\n`;
+
+    navigator.clipboard.writeText(tsv).then(() => {
+        alert('已複製！\n\n去 Google Sheets 揀 A1 格 → 貼上');
+    });
 }
 
 function copySummary(results) {
