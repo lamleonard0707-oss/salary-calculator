@@ -34,22 +34,21 @@
 
             <div class="card">
                 <label class="label">貼上 WhatsApp 報更訊息</label>
-                <p class="hint">格式：每個報更之間空一行<br>
-                    <code>人名<br>日期<br>時間-時間</code>
+                <p class="hint">支援多種格式，直接貼 WhatsApp 訊息即可<br>
+                    <code>智能解析：自動識別人名、日期、時間</code>
                 </p>
-                <textarea id="whatsapp-input" class="textarea" rows="12" placeholder="例如：
+                <textarea id="whatsapp-input" class="textarea" rows="12" placeholder="格式一（標籤式）：
+2026.4.3
+分店：FF
+名字：Yo
+時間1700-0000
 
+格式二（簡潔式）：
 Leonard
 2026-04-09
 1700-0000
 
-Daniel
-2026-04-10
-1800-0330
-
-Crystal
-2026-04-10
-1100-1900"></textarea>
+兩種都得，直接貼就搞掂！"></textarea>
                 <button id="btn-parse" class="btn btn-primary">📥 解析報更</button>
             </div>
 

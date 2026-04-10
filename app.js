@@ -63,32 +63,115 @@ function populateSettings() {
 }
 
 // ============================================================
-// WhatsApp Message Parser
+// WhatsApp Message Parser — Smart / AI-style
 // ============================================================
 function parseWhatsAppMessages(text) {
     const results = [];
-    // Normalize line endings
     const raw = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-    // Split into blocks separated by blank lines
+    // Strategy 1: Try labeled format (分店/名字/時間 style)
+    const labeled = parseLabeledFormat(raw);
+    if (labeled.length > 0) return labeled;
+
+    // Strategy 2: Try simple 3-line blocks (Name / Date / Time)
+    const simple = parseSimpleBlocks(raw);
+    if (simple.length > 0) return simple;
+
+    // Strategy 3: Scan every line looking for dates, names, times
+    return parseFlexible(raw);
+}
+
+// --- Strategy 1: Labeled format ---
+// 2026.4.3
+// 分店：FF
+// 名字：Yo
+// 時間1700-0000
+function parseLabeledFormat(raw) {
+    const results = [];
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+
+    let currentDate = null;
+    let currentName = null;
+    let currentBranch = null;
+
+    for (const line of lines) {
+        // Try date
+        const date = parseDate(line);
+        if (date) {
+            currentDate = date;
+            continue;
+        }
+
+        // Try labeled name: 名字：Yo, 名字:Yo, Name: Yo
+        const nameMatch = line.match(/^(?:名字|姓名|name|員工)\s*[：:]\s*(.+)$/i);
+        if (nameMatch) {
+            currentName = normalizeName(nameMatch[1]);
+            continue;
+        }
+
+        // Try labeled branch: 分店：FF
+        const branchMatch = line.match(/^(?:分店|店鋪|branch|店)\s*[：:]\s*(.+)$/i);
+        if (branchMatch) {
+            currentBranch = branchMatch[1].trim();
+            continue;
+        }
+
+        // Try labeled time: 時間1700-0000, 時間：1700-0000
+        const timeMatch = line.match(/^(?:時間|time)\s*[：:]?\s*(.+)$/i);
+        if (timeMatch) {
+            const times = parseTimeRange(timeMatch[1]);
+            if (times && currentDate && currentName) {
+                results.push({
+                    id: crypto.randomUUID(),
+                    name: currentName,
+                    date: currentDate,
+                    dateStr: formatDate(currentDate),
+                    branch: currentBranch,
+                    ...times
+                });
+                // Don't reset date — multiple entries may share same date
+                currentName = null;
+                currentBranch = null;
+                continue;
+            }
+        }
+
+        // Try bare time range (no label)
+        const times = parseTimeRange(line);
+        if (times && currentDate && currentName) {
+            results.push({
+                id: crypto.randomUUID(),
+                name: currentName,
+                date: currentDate,
+                dateStr: formatDate(currentDate),
+                branch: currentBranch,
+                ...times
+            });
+            currentName = null;
+            currentBranch = null;
+            continue;
+        }
+    }
+
+    return results;
+}
+
+// --- Strategy 2: Simple 3-line blocks (Name / Date / Time) ---
+function parseSimpleBlocks(raw) {
+    const results = [];
     const blocks = raw.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean);
 
     for (const block of blocks) {
         const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
         if (lines.length < 3) continue;
 
-        // Line 1: Name
         const name = normalizeName(lines[0]);
-        if (!name || /^\d/.test(name)) continue; // skip if starts with number (probably not a name)
+        if (!name || /^\d/.test(name)) continue;
 
-        // Line 2: Date — support multiple formats
-        const dateStr = lines[1];
-        const date = parseDate(dateStr);
+        const date = parseDate(lines[1]);
         if (!date) continue;
 
-        // Line 3: Time range
-        const timeStr = lines[2];
-        const times = parseTimeRange(timeStr);
+        const times = parseTimeRange(lines[2]);
         if (!times) continue;
 
         results.push({
@@ -96,11 +179,70 @@ function parseWhatsAppMessages(text) {
             name,
             date,
             dateStr: formatDate(date),
-            timeIn: times.timeIn,
-            timeOut: times.timeOut,
-            timeInStr: times.timeInStr,
-            timeOutStr: times.timeOutStr
+            ...times
         });
+    }
+
+    return results;
+}
+
+// --- Strategy 3: Flexible line-by-line scan ---
+function parseFlexible(raw) {
+    const results = [];
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+
+    let currentDate = null;
+    let currentName = null;
+
+    for (const line of lines) {
+        // Skip WhatsApp metadata lines (timestamps, system messages)
+        if (line.match(/^\[?\d{1,2}[/:]\d{2}[/:]\d{2,4}[\],]/)) continue;
+        if (line.match(/^\d{1,2}:\d{2}\s*(am|pm)/i)) continue;
+
+        // Try date
+        const date = parseDate(line);
+        if (date) { currentDate = date; continue; }
+
+        // Try time range
+        const times = parseTimeRange(line);
+        if (times) {
+            if (currentDate && currentName) {
+                results.push({
+                    id: crypto.randomUUID(),
+                    name: currentName,
+                    date: currentDate,
+                    dateStr: formatDate(currentDate),
+                    ...times
+                });
+                currentName = null;
+            }
+            continue;
+        }
+
+        // Try labeled fields
+        const nameMatch = line.match(/^(?:名字|姓名|name|員工)\s*[：:]\s*(.+)$/i);
+        if (nameMatch) { currentName = normalizeName(nameMatch[1]); continue; }
+
+        const timeMatch = line.match(/^(?:時間|time)\s*[：:]?\s*(.+)$/i);
+        if (timeMatch) {
+            const t = parseTimeRange(timeMatch[1]);
+            if (t && currentDate && currentName) {
+                results.push({
+                    id: crypto.randomUUID(),
+                    name: currentName,
+                    date: currentDate,
+                    dateStr: formatDate(currentDate),
+                    ...t
+                });
+                currentName = null;
+            }
+            continue;
+        }
+
+        // If line is short and looks like a name (no numbers, no special chars)
+        if (line.length <= 20 && /^[\u4e00-\u9fff\u3400-\u4dbfa-zA-Z\s]+$/.test(line)) {
+            currentName = normalizeName(line);
+        }
     }
 
     return results;
@@ -114,19 +256,19 @@ function normalizeName(raw) {
 }
 
 function parseDate(str) {
-    // Support: 2026-04-09, 09/04/2026, 9/4/2026, 09-04-2026, 2026/04/09
+    // Support: 2026-04-09, 2026.4.3, 09/04/2026, 9/4/2026, 09-04-2026, 2026/04/09
     str = str.trim();
 
-    // ISO format: 2026-04-09 or 2026/04/09
-    let m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    // ISO format: 2026-04-09, 2026/04/09, 2026.4.3
+    let m = str.match(/^(\d{4})[-/.。](\d{1,2})[-/.。](\d{1,2})$/);
     if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
 
-    // DD/MM/YYYY or DD-MM-YYYY
-    m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
+    m = str.match(/^(\d{1,2})[-/.。](\d{1,2})[-/.。](\d{4})$/);
     if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
 
-    // DD/MM/YY or DD-MM-YY
-    m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2})$/);
+    // DD/MM/YY, DD-MM-YY, DD.MM.YY
+    m = str.match(/^(\d{1,2})[-/.。](\d{1,2})[-/.。](\d{2})$/);
     if (m) return new Date(2000 + +m[3], +m[2] - 1, +m[1]);
 
     return null;
