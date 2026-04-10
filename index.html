@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Party Room 薪金計算器</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <header>
+            <h1>💰 薪金計算器</h1>
+            <p class="subtitle">Party Room 自動計糧</p>
+        </header>
+
+        <!-- Tab Navigation -->
+        <nav class="tabs">
+            <button class="tab active" data-tab="input">📋 輸入</button>
+            <button class="tab" data-tab="results">📊 結果</button>
+            <button class="tab" data-tab="settings">⚙️ 設定</button>
+        </nav>
+
+        <!-- Input Tab -->
+        <section id="tab-input" class="tab-content active">
+            <div class="card">
+                <label class="label">選擇月份</label>
+                <input type="month" id="salary-month" class="input-field">
+            </div>
+
+            <div class="card">
+                <label class="label">貼上 WhatsApp 報更訊息</label>
+                <p class="hint">格式：每個報更之間空一行<br>
+                    <code>人名<br>日期<br>時間-時間</code>
+                </p>
+                <textarea id="whatsapp-input" class="textarea" rows="12" placeholder="例如：
+
+Leonard
+2026-04-09
+1700-0000
+
+Daniel
+2026-04-10
+1800-0330
+
+Crystal
+2026-04-10
+1100-1900"></textarea>
+                <button id="btn-parse" class="btn btn-primary">📥 解析報更</button>
+            </div>
+
+            <!-- Parsed entries preview -->
+            <div id="parsed-preview" class="card" style="display:none">
+                <div class="card-header">
+                    <label class="label">已解析記錄</label>
+                    <span id="entry-count" class="badge">0</span>
+                </div>
+                <div id="entries-list"></div>
+                <div class="manual-add">
+                    <label class="label">手動新增</label>
+                    <div class="manual-row">
+                        <select id="manual-name" class="input-field small">
+                            <option value="">人名</option>
+                        </select>
+                        <input type="date" id="manual-date" class="input-field small">
+                        <input type="text" id="manual-timein" class="input-field small" placeholder="1700">
+                        <input type="text" id="manual-timeout" class="input-field small" placeholder="0000">
+                        <button id="btn-manual-add" class="btn btn-small">+</button>
+                    </div>
+                </div>
+                <div class="manual-add" style="margin-top:12px">
+                    <label class="label">手動調整（Training / Others）</label>
+                    <div class="manual-row">
+                        <select id="adj-name" class="input-field small">
+                            <option value="">人名</option>
+                        </select>
+                        <select id="adj-type" class="input-field small">
+                            <option value="training">Training</option>
+                            <option value="others">Others</option>
+                        </select>
+                        <input type="number" id="adj-amount" class="input-field small" placeholder="$金額">
+                        <input type="text" id="adj-note" class="input-field small" placeholder="備註">
+                        <button id="btn-adj-add" class="btn btn-small">+</button>
+                    </div>
+                    <div id="adj-list"></div>
+                </div>
+                <button id="btn-calculate" class="btn btn-primary btn-large">💰 計糧</button>
+            </div>
+        </section>
+
+        <!-- Results Tab -->
+        <section id="tab-results" class="tab-content">
+            <div id="results-container">
+                <p class="empty-state">未有計算結果，請先輸入報更資料</p>
+            </div>
+        </section>
+
+        <!-- Settings Tab -->
+        <section id="tab-settings" class="tab-content">
+            <div class="card">
+                <h3>⏰ 時薪設定</h3>
+                <div class="setting-group">
+                    <label>普通同事 — 00:00 前</label>
+                    <input type="number" id="rate-normal-before" class="input-field" value="55">
+                </div>
+                <div class="setting-group">
+                    <label>普通同事 — 00:00 後</label>
+                    <input type="number" id="rate-normal-after" class="input-field" value="70">
+                </div>
+                <div class="setting-group">
+                    <label>老闆級 — 00:00 前</label>
+                    <input type="number" id="rate-boss-before" class="input-field" value="60">
+                </div>
+                <div class="setting-group">
+                    <label>老闆級 — 00:00 後</label>
+                    <input type="number" id="rate-boss-after" class="input-field" value="70">
+                </div>
+            </div>
+            <div class="card">
+                <h3>🚗 交通津貼</h3>
+                <div class="setting-group">
+                    <label>過 midnight 津貼</label>
+                    <input type="number" id="transport-allowance" class="input-field" value="30">
+                </div>
+            </div>
+            <div class="card">
+                <h3>🎁 勤工獎</h3>
+                <div class="setting-group">
+                    <label>≥10 次獎金</label>
+                    <input type="number" id="bonus-10" class="input-field" value="500">
+                </div>
+                <div class="setting-group">
+                    <label>≥5 次獎金</label>
+                    <input type="number" id="bonus-5" class="input-field" value="200">
+                </div>
+            </div>
+            <div class="card">
+                <h3>👑 老闆名單</h3>
+                <div id="boss-list"></div>
+                <div class="manual-row">
+                    <input type="text" id="new-boss-name" class="input-field" placeholder="新增老闆名">
+                    <button id="btn-add-boss" class="btn btn-small">+</button>
+                </div>
+            </div>
+            <div class="card">
+                <h3>👥 全職人員</h3>
+                <div id="fulltime-list"></div>
+                <div class="manual-row">
+                    <input type="text" id="new-ft-name" class="input-field" placeholder="人名">
+                    <input type="number" id="new-ft-salary" class="input-field" placeholder="月薪">
+                    <button id="btn-add-ft" class="btn btn-small">+</button>
+                </div>
+            </div>
+            <button id="btn-save-settings" class="btn btn-primary">💾 儲存設定</button>
+        </section>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
