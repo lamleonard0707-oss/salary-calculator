@@ -34,8 +34,8 @@
 
             <div class="card">
                 <label class="label">貼上 WhatsApp 報更訊息</label>
-                <p class="hint">支援多種格式，直接貼 WhatsApp 訊息即可<br>
-                    <code>智能解析：自動識別人名、日期、時間</code>
+                <p class="hint" id="parse-hint">支援多種格式，直接貼 WhatsApp 訊息即可<br>
+                    <code id="parse-mode-label">智能解析：自動識別人名、日期、時間</code>
                 </p>
                 <textarea id="whatsapp-input" class="textarea" rows="12" placeholder="格式一（標籤式）：
 2026.4.3
@@ -152,6 +152,14 @@ Leonard
                     <input type="text" id="new-ft-name" class="input-field" placeholder="人名">
                     <input type="number" id="new-ft-salary" class="input-field" placeholder="月薪">
                     <button id="btn-add-ft" class="btn btn-small">+</button>
+                </div>
+            </div>
+            <div class="card">
+                <h3>🤖 AI 解析（Gemini）</h3>
+                <div class="setting-group">
+                    <label>Gemini API Key</label>
+                    <input type="password" id="gemini-api-key" class="input-field" placeholder="AIza...">
+                    <p class="hint">有 key 就用 AI 解析，冇就用傳統 regex</p>
                 </div>
             </div>
             <button id="btn-save-settings" class="btn btn-primary">💾 儲存設定</button>

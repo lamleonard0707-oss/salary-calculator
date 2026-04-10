@@ -33,9 +33,16 @@ let lastResults = null;
 function loadSettings() {
     try {
         const saved = localStorage.getItem('salary-settings');
-        if (saved) return JSON.parse(saved);
+        if (saved) {
+            const s = JSON.parse(saved);
+            // Migrate: ensure geminiKey exists
+            if (!s.geminiKey) s.geminiKey = '';
+            return s;
+        }
     } catch (e) {}
-    return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    const s = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    s.geminiKey = '';
+    return s;
 }
 
 function saveSettings() {
@@ -46,7 +53,9 @@ function saveSettings() {
     settings.transport = num('transport-allowance');
     settings.bonus.tier10 = num('bonus-10');
     settings.bonus.tier5 = num('bonus-5');
+    settings.geminiKey = el('gemini-api-key').value.trim();
     localStorage.setItem('salary-settings', JSON.stringify(settings));
+    updateParseMode();
     alert('設定已儲存 ✓');
 }
 
@@ -58,13 +67,87 @@ function populateSettings() {
     el('transport-allowance').value = settings.transport;
     el('bonus-10').value = settings.bonus.tier10;
     el('bonus-5').value = settings.bonus.tier5;
+    el('gemini-api-key').value = settings.geminiKey || '';
     renderBossList();
     renderFulltimeList();
+    updateParseMode();
+}
+
+function updateParseMode() {
+    const label = el('parse-mode-label');
+    if (settings.geminiKey) {
+        label.textContent = '🤖 AI 模式：用 Gemini 智能解析';
+        label.style.color = '#4ade80';
+    } else {
+        label.textContent = '📝 傳統模式：regex 格式解析';
+        label.style.color = '';
+    }
 }
 
 // ============================================================
-// WhatsApp Message Parser — Smart / AI-style
+// WhatsApp Message Parser — LLM (Gemini) + Fallback Regex
 // ============================================================
+async function parseWithGemini(text) {
+    const apiKey = settings.geminiKey;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+    const prompt = `你係一個 WhatsApp 報更訊息解析器。從以下訊息中抽取所有員工嘅返工記錄。
+
+規則：
+- 抽取每條記錄嘅：人名(name)、日期(date, YYYY-MM-DD格式)、返工時間(timeIn, HH:MM 24小時制)、收工時間(timeOut, HH:MM 24小時制)
+- 如果有分店資料就加 branch
+- 日期可能係各種格式（2026.4.3, 09/04/2026, 4月3日 等）
+- 時間可能係 1700-0000, 17:00-00:00, 5pm-12am 等格式
+- 一個人可能有多日記錄
+- 忽略 WhatsApp 系統訊息（時間戳、已讀等）
+
+只輸出 JSON array，唔好有其他文字：
+[{"name":"人名","date":"YYYY-MM-DD","timeIn":"HH:MM","timeOut":"HH:MM","branch":"分店名或null"}]
+
+WhatsApp 訊息：
+${text}`;
+
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0, maxOutputTokens: 4096 }
+        })
+    });
+
+    if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(`Gemini API error: ${resp.status} — ${err}`);
+    }
+
+    const data = await resp.json();
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    // Extract JSON from response (may be wrapped in ```json ... ```)
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error('Gemini 回傳格式唔啱');
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    return parsed.map(item => {
+        const d = new Date(item.date);
+        const [inH, inM] = item.timeIn.split(':').map(Number);
+        const [outH, outM] = item.timeOut.split(':').map(Number);
+        return {
+            id: crypto.randomUUID(),
+            name: normalizeName(item.name),
+            date: d,
+            dateStr: formatDate(d),
+            branch: item.branch || null,
+            timeIn: inH * 60 + inM,
+            timeOut: outH * 60 + outM,
+            timeInStr: `${pad2(inH)}:${pad2(inM)}`,
+            timeOutStr: `${pad2(outH)}:${pad2(outM)}`
+        };
+    });
+}
+
 function parseWhatsAppMessages(text) {
     const results = [];
     const raw = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -751,17 +834,51 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Parse button
-    el('btn-parse').addEventListener('click', () => {
+    el('btn-parse').addEventListener('click', async () => {
         const text = el('whatsapp-input').value.trim();
         if (!text) { alert('請先貼上報更訊息'); return; }
-        const parsed = parseWhatsAppMessages(text);
-        if (parsed.length === 0) {
-            alert('解析唔到任何報更記錄，請檢查格式：\n\n人名\n日期\n時間-時間');
-            return;
+
+        const btn = el('btn-parse');
+
+        if (settings.geminiKey) {
+            // AI mode
+            btn.disabled = true;
+            btn.textContent = '🤖 AI 解析中...';
+            try {
+                const parsed = await parseWithGemini(text);
+                if (parsed.length === 0) {
+                    alert('AI 解析唔到任何報更記錄');
+                    return;
+                }
+                entries = [...entries, ...parsed];
+                renderEntries();
+                el('whatsapp-input').value = '';
+            } catch (e) {
+                alert('AI 解析失敗：' + e.message + '\n\n改用傳統模式重試...');
+                // Fallback to regex
+                const parsed = parseWhatsAppMessages(text);
+                if (parsed.length > 0) {
+                    entries = [...entries, ...parsed];
+                    renderEntries();
+                    el('whatsapp-input').value = '';
+                } else {
+                    alert('傳統模式都解析唔到，請檢查格式');
+                }
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📥 解析報更';
+            }
+        } else {
+            // Regex mode
+            const parsed = parseWhatsAppMessages(text);
+            if (parsed.length === 0) {
+                alert('解析唔到任何報更記錄，請檢查格式：\n\n人名\n日期\n時間-時間\n\n或者去設定加 Gemini API Key 用 AI 解析');
+                return;
+            }
+            entries = [...entries, ...parsed];
+            renderEntries();
+            el('whatsapp-input').value = '';
         }
-        entries = [...entries, ...parsed];
-        renderEntries();
-        el('whatsapp-input').value = '';
     });
 
     // Manual add entry
