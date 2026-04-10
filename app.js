@@ -652,7 +652,7 @@ function renderResults(results) {
     // Export buttons
     html += `
         <div class="export-row">
-            <button class="btn btn-primary" id="btn-copy-sheets">📊 複製到 Sheets</button>
+            <button class="btn btn-primary" id="btn-copy-sheets">📊 匯入 Sheets</button>
             <button class="btn btn-export" id="btn-export-csv">📄 Export CSV</button>
             <button class="btn btn-outline" id="btn-copy-summary">📋 複製摘要</button>
         </div>
@@ -712,40 +712,55 @@ function exportCSV(results) {
 }
 
 function copyToSheets(results) {
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxYZuT9n40ivHTL4jIxHxekqps7YZC_MTOOIM6XJnb3BLleMKvqUNQZ5owJ2Qsluic5/exec';
+
     const month = el('salary-month').value;
-    const monthLabel = month ? formatMonthLabel(month) : '';
+    const monthLabel = month ? formatMonthLabel(month) : '未命名';
 
-    // Header row
-    let tsv = '人名\t日期\t返工\t收工\t00:00前($)\t00:00後($)\t交通($)\t更期薪金($)\n';
+    // 準備兼職資料
+    const parttime = Object.values(results).map(p => ({
+        name: p.name,
+        shiftCount: p.shiftCount,
+        bonus: p.bonus,
+        adjTotal: p.adjTotal,
+        shifts: p.shifts.map(s => ({
+            date: s.date,
+            timeIn: s.timeIn,
+            timeOut: s.timeOut,
+            beforePay: s.beforePay,
+            afterPay: s.afterPay,
+            transport: s.transport
+        }))
+    }));
 
-    for (const p of Object.values(results)) {
-        for (const s of p.shifts) {
-            tsv += `${p.name}\t${s.date}\t${s.timeIn}\t${s.timeOut}\t${s.beforePay.toFixed(2)}\t${s.afterPay.toFixed(2)}\t${s.transport.toFixed(2)}\t${s.total.toFixed(2)}\n`;
+    const payload = {
+        month: monthLabel,
+        parttime: parttime,
+        fulltime: settings.fulltime.map(ft => ({ name: ft.name, salary: ft.salary }))
+    };
+
+    const btn = el('btn-copy-sheets');
+    btn.textContent = '⏳ 匯入中...';
+    btn.disabled = true;
+
+    fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert('✅ 已匯入 Google Sheets！\n\n新 sheet：' + data.sheet);
+        } else {
+            alert('❌ 匯入失敗：' + data.error);
         }
-    }
-
-    // Summary section
-    tsv += '\n人名\t更數\t更期薪金\t勤工獎\t調整\t總計\n';
-    let ptTotal = 0;
-    for (const p of Object.values(results)) {
-        tsv += `${p.name}\t${p.shiftCount}\t${p.shiftPay.toFixed(2)}\t${p.bonus.toFixed(2)}\t${p.adjTotal.toFixed(2)}\t${p.total.toFixed(2)}\n`;
-        ptTotal += p.total;
-    }
-
-    // Fulltime
-    let ftTotal = 0;
-    tsv += '\n全職人員\t月薪\n';
-    for (const ft of settings.fulltime) {
-        tsv += `${ft.name}\t${ft.salary.toFixed(2)}\n`;
-        ftTotal += ft.salary;
-    }
-
-    tsv += `\n兼職合計\t${ptTotal.toFixed(2)}\n`;
-    tsv += `全職合計\t${ftTotal.toFixed(2)}\n`;
-    tsv += `總支出\t${(ptTotal + ftTotal).toFixed(2)}\n`;
-
-    navigator.clipboard.writeText(tsv).then(() => {
-        alert('已複製！\n\n去 Google Sheets 揀 A1 格 → 貼上');
+    })
+    .catch(err => {
+        alert('❌ 網絡錯誤：' + err.message);
+    })
+    .finally(() => {
+        btn.textContent = '📊 匯入 Sheets';
+        btn.disabled = false;
     });
 }
 
