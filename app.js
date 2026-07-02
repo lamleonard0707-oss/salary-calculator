@@ -83,7 +83,7 @@ function updateParseMode() {
 // ============================================================
 async function parseWithGemini(text) {
     const apiKey = settings.geminiKey;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     const prompt = `你係一個 WhatsApp 報更訊息解析器。從以下訊息中抽取所有員工嘅返工記錄。
 
