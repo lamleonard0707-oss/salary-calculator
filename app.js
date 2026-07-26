@@ -32,11 +32,13 @@ function loadSettings() {
             const s = JSON.parse(saved);
             // Migrate: ensure geminiKey exists
             if (!s.geminiKey) s.geminiKey = '';
+            if (!s.sheetsToken) s.sheetsToken = '';
             return s;
         }
     } catch (e) {}
     const s = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
     s.geminiKey = '';
+    s.sheetsToken = '';
     return s;
 }
 
@@ -49,6 +51,7 @@ function saveSettings() {
     settings.bonus.tier10 = num('bonus-10');
     settings.bonus.tier5 = num('bonus-5');
     settings.geminiKey = el('gemini-api-key').value.trim();
+    settings.sheetsToken = el('sheets-token').value.trim();
     localStorage.setItem('salary-settings', JSON.stringify(settings));
     updateParseMode();
     alert('設定已儲存 ✓');
@@ -63,6 +66,7 @@ function populateSettings() {
     el('bonus-10').value = settings.bonus.tier10;
     el('bonus-5').value = settings.bonus.tier5;
     el('gemini-api-key').value = settings.geminiKey || '';
+    el('sheets-token').value = settings.sheetsToken || '';
     renderBossList();
     updateParseMode();
 }
@@ -689,6 +693,12 @@ function exportCSV(results) {
 function copyToSheets(results) {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxYZuT9n40ivHTL4jIxHxekqps7YZC_MTOOIM6XJnb3BLleMKvqUNQZ5owJ2Qsluic5/exec';
 
+    // 通行碼存喺 localStorage，唔會出現喺呢個公開檔入面
+    if (!settings.sheetsToken) {
+        alert('⚠️ 未設定通行碼\n\n去「設定」→「匯入 Sheets 通行碼」填咗佢先，先至匯入到 Google Sheets。');
+        return;
+    }
+
     const month = el('salary-month').value;
     const monthLabel = month ? formatMonthLabel(month) : '未命名';
 
@@ -709,6 +719,7 @@ function copyToSheets(results) {
     }));
 
     const payload = {
+        token: settings.sheetsToken,
         month: monthLabel,
         parttime: parttime,
         fulltime: []
@@ -726,6 +737,8 @@ function copyToSheets(results) {
     .then(data => {
         if (data.success) {
             alert('✅ 已匯入 Google Sheets！\n\n新 sheet：' + data.sheet);
+        } else if (data.error === 'unauthorized') {
+            alert('🔐 通行碼唔啱\n\n去「設定」→「匯入 Sheets 通行碼」核對返。');
         } else {
             alert('❌ 匯入失敗：' + data.error);
         }
