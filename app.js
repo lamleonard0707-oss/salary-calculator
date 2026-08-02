@@ -150,6 +150,10 @@ function parseWhatsAppMessages(text) {
     const results = [];
     const raw = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
+    // Strategy 0: WhatsApp 逐則訊息（[16/7 00:53] 阿邊個: 姓名：X / 地點：Y / 時間：… / 日期：…）
+    const wa = parseWhatsAppBlocks(raw);
+    if (wa.length > 0) return wa;
+
     // Strategy 1: Try labeled format (分店/名字/時間 style)
     const labeled = parseLabeledFormat(raw);
     if (labeled.length > 0) return labeled;
@@ -160,6 +164,91 @@ function parseWhatsAppMessages(text) {
 
     // Strategy 3: Scan every line looking for dates, names, times
     return parseFlexible(raw);
+}
+
+// --- Strategy 0: WhatsApp 逐則訊息 ---
+// [16/7 00:53] Gordon and: 姓名：Gordon
+// 地點：FF
+// 時間：17:00-0000
+// 日期：7月8日
+// 欄位次序唔重要，一則訊息 = 一更。
+const WA_PREFIX = [
+    // [16/7 00:53] 阿邊個:  /  [16/7/2026, 00:53:12] 阿邊個:
+    /^\[\s*\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?[,\s]+\d{1,2}:\d{2}(?::\d{2})?\s*(?:[apAP]\.?[mM]\.?)?\s*\]\s*[^:：]{1,40}[:：]\s*/,
+    // 16/7/2026, 00:53 - 阿邊個:
+    /^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:[apAP]\.?[mM]\.?)?\s*-\s*[^:：]{1,40}[:：]\s*/
+];
+
+function stripWhatsAppPrefix(line) {
+    for (const re of WA_PREFIX) {
+        const m = line.match(re);
+        if (m) return { stripped: line.slice(m[0].length), isNew: true };
+    }
+    return { stripped: line, isNew: false };
+}
+
+function parseWhatsAppBlocks(raw) {
+    const lines = raw.split('\n');
+    const blocks = [];
+    let current = null;
+
+    for (const line of lines) {
+        const { stripped, isNew } = stripWhatsAppPrefix(line.trim());
+        if (isNew) {
+            if (current) blocks.push(current);
+            current = [];
+        }
+        if (current && stripped.trim()) current.push(stripped.trim());
+    }
+    if (current) blocks.push(current);
+
+    const results = [];
+    for (const block of blocks) {
+        const body = block.join('\n');
+
+        const nameM = body.match(/(?:姓名|名字|員工|员工|name)\s*[：:]\s*(.+)/i);
+        const timeM = body.match(/(?:時間|时间|time)\s*\d?\s*[：:]?\s*([\d:.]{3,}\s*(?:[-–—~]|至|to)\s*[\d:.]{3,})/i);
+        const dateM = body.match(/(?:日期|date)\s*[：:]\s*(.+)/i);
+        const branchM = body.match(/(?:地點|地点|分店|店鋪|店舖|branch|店)\s*[：:]\s*(.+)/i);
+
+        if (!nameM || !timeM) continue;
+
+        const times = parseTimeRange(timeM[1]);
+        if (!times) continue;
+
+        // 日期：有標籤就用標籤，冇就掃 block 入面任何一行當日期
+        let date = dateM ? parseDate(dateM[1]) : null;
+        if (!date) {
+            for (const l of block) {
+                const d = parseDate(l);
+                if (d) { date = d; break; }
+            }
+        }
+        if (!date) continue;
+
+        results.push({
+            id: crypto.randomUUID(),
+            name: normalizeName(nameM[1]),
+            date,
+            dateStr: formatDate(date),
+            branch: branchM ? branchM[1].trim() : null,
+            ...times
+        });
+    }
+
+    return results;
+}
+
+// 冇寫年份嘅日期（例：7月8日）→ 用「選擇月份」嗰個年份
+function getDefaultYear() {
+    try {
+        const v = el('salary-month') && el('salary-month').value;
+        if (v) {
+            const y = parseInt(v.split('-')[0]);
+            if (y > 1900) return y;
+        }
+    } catch (e) { /* 非瀏覽器環境 */ }
+    return new Date().getFullYear();
 }
 
 // --- Strategy 1: Labeled format ---
@@ -191,7 +280,7 @@ function parseLabeledFormat(raw) {
         }
 
         // Try labeled branch: 分店：FF
-        const branchMatch = line.match(/^(?:分店|店鋪|branch|店)\s*[：:]\s*(.+)$/i);
+        const branchMatch = line.match(/^(?:地點|地点|分店|店鋪|店舖|branch|店)\s*[：:]\s*(.+)$/i);
         if (branchMatch) {
             currentBranch = branchMatch[1].trim();
             continue;
@@ -337,8 +426,9 @@ function normalizeName(raw) {
 }
 
 function parseDate(str) {
-    // Support: 2026-04-09, 2026.4.3, 09/04/2026, 9/4/2026, 09-04-2026, 2026/04/09
-    str = str.trim();
+    // Support: 2026-04-09, 2026.4.3, 09/04/2026, 9/4/2026, 09-04-2026, 2026/04/09,
+    //          7月8日, 2026年7月8日, 8/7（冇年份 → 用選擇月份嗰年）
+    str = String(str).trim().replace(/^(?:日期|date)\s*[：:]\s*/i, '').trim();
 
     // ISO format: 2026-04-09, 2026/04/09, 2026.4.3
     let m = str.match(/^(\d{4})[-/.。](\d{1,2})[-/.。](\d{1,2})$/);
@@ -352,24 +442,55 @@ function parseDate(str) {
     m = str.match(/^(\d{1,2})[-/.。](\d{1,2})[-/.。](\d{2})$/);
     if (m) return new Date(2000 + +m[3], +m[2] - 1, +m[1]);
 
+    // 2026年7月8日 / 2026年7月8號
+    m = str.match(/^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日號号]?$/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+
+    // 7月8日 / 7月8號（冇年份）
+    m = str.match(/^(\d{1,2})\s*月\s*(\d{1,2})\s*[日號号]?$/);
+    if (m) return new Date(getDefaultYear(), +m[1] - 1, +m[2]);
+
+    // DD/MM（冇年份，香港習慣日先月後）
+    m = str.match(/^(\d{1,2})[-/.](\d{1,2})$/);
+    if (m) {
+        const d = +m[1], mo = +m[2];
+        if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) return new Date(getDefaultYear(), mo - 1, d);
+    }
+
     return null;
 }
 
+// 單邊時間：1700 / 700 / 17:00 / 17.00 / 24:00 → {h, m}
+function parseClock(t) {
+    t = String(t).trim().replace(/[.：]/g, ':');
+
+    let h, mm;
+    let m = t.match(/^(\d{1,2}):(\d{2})$/);
+    if (m) {
+        h = +m[1]; mm = +m[2];
+    } else {
+        m = t.match(/^(\d{3,4})$/);
+        if (!m) return null;
+        const p = m[1].padStart(4, '0');
+        h = +p.slice(0, 2); mm = +p.slice(2);
+    }
+
+    if (h === 24 && mm === 0) h = 0;   // 24:00 = 00:00（通宵更靠日期分辨）
+    if (h > 23 || mm > 59) return null;
+    return { h, m: mm };
+}
+
 function parseTimeRange(str) {
-    str = str.trim().replace(/\s+/g, '');
-    // Support: 1700-0000, 17:00-00:00, 1700至0000, 1700to0000
-    const m = str.match(/^(\d{3,4})[:\s]?(\d{0,2})?\s*[-–至to~]\s*(\d{3,4})[:\s]?(\d{0,2})?$/i);
-    if (!m) return null;
+    str = String(str).trim().replace(/\s+/g, '');
+    // Support: 1700-0000, 17:00-00:00, 17:00-0000, 1700至0000, 1700to0000
+    const parts = str.split(/(?:[-–—~]|至|to)/i);
+    if (parts.length !== 2) return null;
 
-    const inStr = m[1].padStart(4, '0');
-    const outStr = m[3].padStart(4, '0');
+    const a = parseClock(parts[0]);
+    const b = parseClock(parts[1]);
+    if (!a || !b) return null;
 
-    const inH = parseInt(inStr.slice(0, 2));
-    const inM = parseInt(inStr.slice(2));
-    const outH = parseInt(outStr.slice(0, 2));
-    const outM = parseInt(outStr.slice(2));
-
-    if (inH > 23 || inM > 59 || outH > 23 || outM > 59) return null;
+    const inH = a.h, inM = a.m, outH = b.h, outM = b.m;
 
     return {
         timeIn: inH * 60 + inM,   // minutes from midnight
@@ -889,7 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Regex mode
             const parsed = parseWhatsAppMessages(text);
             if (parsed.length === 0) {
-                alert('解析唔到任何報更記錄，請檢查格式：\n\n人名\n日期\n時間-時間\n\n或者去設定加 Gemini API Key 用 AI 解析');
+                alert('解析唔到任何報更記錄，請檢查格式：\n\n姓名：阿邊個\n地點：FF\n時間：17:00-0000\n日期：7月8日\n\n（WhatsApp 直接複製貼上都得）\n仲係唔得就去設定加 Gemini API Key 用 AI 解析');
                 return;
             }
             entries = [...entries, ...parsed];
